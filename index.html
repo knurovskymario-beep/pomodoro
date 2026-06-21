@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pomodoro</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --ring: #e63946;
+    --ring-glow: rgba(230,57,70,0.3);
+    --text: #f1faee;
+    --muted: #6b7280;
+    --accent: #e63946;
+    --transition: 1.2s ease;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    transition: background var(--transition), color var(--transition);
+    user-select: none;
+  }
+
+  /* ── mood themes ── */
+  body.focus {
+    --bg: #0a0a12;
+    --surface: #12121e;
+    --ring: #457b9d;
+    --ring-glow: rgba(69,123,157,0.3);
+    --accent: #457b9d;
+  }
+  body.relax {
+    --bg: #0a120a;
+    --surface: #121e12;
+    --ring: #52b788;
+    --ring-glow: rgba(82,183,136,0.3);
+    --accent: #52b788;
+  }
+  body.chaos {
+    --bg: #120a12;
+    --surface: #1e121e;
+    --ring: #f77f00;
+    --ring-glow: rgba(247,127,0,0.4);
+    --accent: #f77f00;
+    animation: huecycle 4s linear infinite;
+  }
+
+  @keyframes huecycle {
+    0%   { filter: hue-rotate(0deg); }
+    100% { filter: hue-rotate(360deg); }
+  }
+
+  h1 {
+    font-size: 0.8rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 400;
+  }
+
+  /* ── phase tabs ── */
+  .phases {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .phase-btn {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--muted);
+    padding: 0.35rem 0.9rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    transition: all 0.2s;
+  }
+  .phase-btn.active {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  /* ── ring ── */
+  .ring-wrap {
+    position: relative;
+    width: 240px;
+    height: 240px;
+  }
+  svg.ring {
+    transform: rotate(-90deg);
+    width: 240px;
+    height: 240px;
+  }
+  .ring-bg { fill: none; stroke: var(--surface); stroke-width: 8; }
+  .ring-fg {
+    fill: none;
+    stroke: var(--ring);
+    stroke-width: 8;
+    stroke-linecap: round;
+    stroke-dasharray: 659;
+    stroke-dashoffset: 0;
+    transition: stroke-dashoffset 1s linear, stroke 1.2s ease;
+    filter: drop-shadow(0 0 6px var(--ring-glow));
+  }
+  .ring-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+  }
+  #time-display {
+    font-size: 3.2rem;
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  #phase-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* ── controls ── */
+  .controls {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+  }
+  .btn {
+    background: var(--surface);
+    border: 1px solid rgba(255,255,255,0.07);
+    color: var(--text);
+    padding: 0.65rem 1.6rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+  .btn:hover { background: rgba(255,255,255,0.08); }
+  .btn:active { transform: scale(0.96); }
+  .btn.primary {
+    background: var(--accent);
+    border-color: transparent;
+    color: #fff;
+    font-weight: 500;
+    min-width: 100px;
+    transition: background 1.2s ease, transform 0.1s;
+  }
+  .btn.primary:hover { filter: brightness(1.12); }
+
+  /* ── moods ── */
+  .mood-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .mood-btn {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--muted);
+    padding: 0.3rem 0.8rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .mood-btn.active {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  /* ── sessions ── */
+  .sessions {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid rgba(255,255,255,0.12);
+    transition: background 0.4s;
+  }
+  .dot.done { background: var(--accent); border-color: transparent; }
+
+  /* ── notification ── */
+  .toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: var(--text);
+    padding: 0.6rem 1.4rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+</style>
+</head>
+<body class="focus">
+
+<h1>Pomodoro</h1>
+
+<div class="phases">
+  <button class="phase-btn active" data-phase="work">Práca</button>
+  <button class="phase-btn" data-phase="short">Krátka pauza</button>
+  <button class="phase-btn" data-phase="long">Dlhá pauza</button>
+</div>
+
+<div class="ring-wrap">
+  <svg class="ring" viewBox="0 0 220 220">
+    <circle class="ring-bg" cx="110" cy="110" r="105"/>
+    <circle class="ring-fg" id="ring-fg" cx="110" cy="110" r="105"/>
+  </svg>
+  <div class="ring-center">
+    <div id="time-display">25:00</div>
+    <div id="phase-label">focus</div>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="btn" id="reset-btn">Reset</button>
+  <button class="btn primary" id="start-btn">Štart</button>
+</div>
+
+<div class="mood-row">
+  <button class="mood-btn active" data-mood="focus">Focus</button>
+  <button class="mood-btn" data-mood="relax">Relax</button>
+  <button class="mood-btn" data-mood="chaos">Chaos</button>
+</div>
+
+<div class="sessions" id="sessions">
+  <div class="dot"></div>
+  <div class="dot"></div>
+  <div class="dot"></div>
+  <div class="dot"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const PHASES = {
+  work:  { label: 'focus',       secs: 25 * 60 },
+  short: { label: 'pauza',       secs:  5 * 60 },
+  long:  { label: 'dlhá pauza',  secs: 15 * 60 },
+};
+
+const MOODS = {
+  focus: { label: 'Focus' },
+  relax: { label: 'Relax' },
+  chaos: { label: 'Chaos ⚡' },
+};
+
+let currentPhase = 'work';
+let currentMood  = 'focus';
+let running      = false;
+let remaining    = PHASES.work.secs;
+let total        = PHASES.work.secs;
+let interval     = null;
+let sessions     = 0;
+
+const CIRCUMFERENCE = 2 * Math.PI * 105;
+
+const ringEl    = document.getElementById('ring-fg');
+const timeEl    = document.getElementById('time-display');
+const labelEl   = document.getElementById('phase-label');
+const startBtn  = document.getElementById('start-btn');
+const resetBtn  = document.getElementById('reset-btn');
+const sessionsEl = document.getElementById('sessions');
+const toastEl   = document.getElementById('toast');
+
+ringEl.style.strokeDasharray = CIRCUMFERENCE;
+
+function fmt(s) {
+  const m = Math.floor(s / 60).toString().padStart(2, '0');
+  const sec = (s % 60).toString().padStart(2, '0');
+  return `${m}:${sec}`;
+}
+
+function updateRing() {
+  const pct = remaining / total;
+  ringEl.style.strokeDashoffset = CIRCUMFERENCE * (1 - pct);
+}
+
+function render() {
+  timeEl.textContent = fmt(remaining);
+  updateRing();
+}
+
+function setPhase(phase) {
+  currentPhase = phase;
+  remaining = PHASES[phase].secs;
+  total     = PHASES[phase].secs;
+  labelEl.textContent = PHASES[phase].label;
+  document.querySelectorAll('.phase-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.phase === phase));
+  render();
+}
+
+function setMood(mood) {
+  currentMood = mood;
+  document.body.className = mood;
+  document.querySelectorAll('.mood-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mood === mood));
+}
+
+function beep(type) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const notes = type === 'done'
+      ? [523, 659, 784]
+      : [392, 330];
+    notes.forEach((freq, i) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = currentMood === 'chaos' ? 'sawtooth' : 'sine';
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.18;
+      gain.gain.setValueAtTime(0.18, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      osc.start(t);
+      osc.stop(t + 0.36);
+    });
+  } catch(e) {}
+}
+
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  setTimeout(() => toastEl.classList.remove('show'), 2800);
+}
+
+function tick() {
+  if (remaining <= 0) {
+    clearInterval(interval);
+    running = false;
+    startBtn.textContent = 'Štart';
+
+    beep('done');
+
+    if (currentPhase === 'work') {
+      sessions = Math.min(sessions + 1, 4);
+      updateDots();
+      if (sessions === 4) {
+        showToast('4 cykly hotové — zaslúžená dlhá pauza!');
+        sessions = 0;
+        updateDots();
+        setPhase('long');
+      } else {
+        showToast('Pauza si zaslúžená!');
+        setPhase('short');
+      }
+    } else {
+      showToast('Späť do práce!');
+      setPhase('work');
+    }
+    return;
+  }
+  remaining--;
+  render();
+}
+
+function updateDots() {
+  document.querySelectorAll('.dot').forEach((d, i) =>
+    d.classList.toggle('done', i < sessions));
+}
+
+startBtn.addEventListener('click', () => {
+  if (running) {
+    clearInterval(interval);
+    running = false;
+    startBtn.textContent = 'Pokračovať';
+  } else {
+    beep('start');
+    interval = setInterval(tick, 1000);
+    running = true;
+    startBtn.textContent = 'Pauza';
+  }
+});
+
+resetBtn.addEventListener('click', () => {
+  clearInterval(interval);
+  running = false;
+  startBtn.textContent = 'Štart';
+  setPhase(currentPhase);
+});
+
+document.querySelectorAll('.phase-btn').forEach(b =>
+  b.addEventListener('click', () => {
+    if (running) { clearInterval(interval); running = false; startBtn.textContent = 'Štart'; }
+    setPhase(b.dataset.phase);
+  }));
+
+document.querySelectorAll('.mood-btn').forEach(b =>
+  b.addEventListener('click', () => setMood(b.dataset.mood)));
+
+render();
+</script>
+</body>
+</html>

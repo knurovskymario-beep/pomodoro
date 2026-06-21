@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beat Maker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #181818;
+    --text: #f1faee;
+    --muted: #6b7280;
+    --border: rgba(255,255,255,0.06);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2.5rem 2rem;
+    gap: 2rem;
+    user-select: none;
+  }
+
+  h1 {
+    font-size: 0.75rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 400;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.55rem 1.5rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.12s, transform 0.08s;
+  }
+  .btn:hover { background: rgba(255,255,255,0.07); }
+  .btn:active { transform: scale(0.96); }
+
+  #play-btn {
+    background: #e63946;
+    border-color: transparent;
+    color: #fff;
+    font-weight: 600;
+    min-width: 88px;
+  }
+  #play-btn:hover { filter: brightness(1.15); }
+  #play-btn.playing { background: #457b9d; }
+
+  .bpm-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 110px;
+    height: 3px;
+    background: #333;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #e63946;
+    cursor: pointer;
+  }
+  #bpm-val {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    min-width: 3ch;
+  }
+
+  .hint {
+    font-size: 0.7rem;
+    color: #3a3a3a;
+    letter-spacing: 0.05em;
+  }
+
+  /* Grid */
+  .grid-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .row-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    width: 56px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .steps {
+    display: flex;
+    gap: 3px;
+  }
+
+  .group {
+    display: flex;
+    gap: 3px;
+    margin-right: 6px;
+  }
+  .group:last-child { margin-right: 0; }
+
+  .step {
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    background: #1e1e1e;
+    border: 1px solid rgba(255,255,255,0.05);
+    cursor: pointer;
+    transition: background 0.08s, filter 0.08s;
+    position: relative;
+  }
+  .step:hover:not(.on) { background: #2a2a2a; }
+
+  .step.current::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 8px;
+    border: 2px solid rgba(255,255,255,0.35);
+    pointer-events: none;
+  }
+  .step.on.current { filter: brightness(1.5); }
+</style>
+</head>
+<body>
+
+<h1>Beat Maker</h1>
+
+<div class="controls">
+  <button class="btn" id="play-btn">Play</button>
+  <button class="btn" id="clear-btn">Clear</button>
+  <div class="bpm-wrap">
+    BPM
+    <input type="range" id="bpm-slider" min="60" max="200" value="120">
+    <span id="bpm-val">120</span>
+  </div>
+</div>
+
+<div class="grid-wrap" id="grid"></div>
+
+<div class="hint">medzerník = play / stop</div>
+
+<script>
+const INSTRUMENTS = [
+  { name: 'Kick',    color: '#e63946', play: playKick },
+  { name: 'Snare',   color: '#f4a261', play: playSnare },
+  { name: 'Clap',    color: '#ffd166', play: playClap },
+  { name: 'Hi-Hat',  color: '#a8dadc', play: playHihat },
+  { name: 'Open HH', color: '#90e0ef', play: playOpenHH },
+  { name: 'Rim',     color: '#c77dff', play: playRim },
+  { name: 'Tom',     color: '#52b788', play: playTom },
+  { name: 'Sub',     color: '#06d6a0', play: playSub },
+];
+
+const STEPS = 16;
+const ac = new (window.AudioContext || window.webkitAudioContext)();
+const grid = INSTRUMENTS.map(() => Array(STEPS).fill(false));
+
+// ── synth helpers ──────────────────────────────────────────
+
+function noiseBuf(secs) {
+  const len = Math.ceil(ac.sampleRate * secs);
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  return buf;
+}
+
+function osc(freq, type, gainVal, start, dur, freqEnd) {
+  const o = ac.createOscillator();
+  const g = ac.createGain();
+  o.type = type || 'sine';
+  o.connect(g); g.connect(ac.destination);
+  o.frequency.setValueAtTime(freq, start);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, start + dur);
+  g.gain.setValueAtTime(gainVal, start);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  o.start(start); o.stop(start + dur + 0.01);
+}
+
+function noiseNode(buf, filterType, filterFreq, q, gainVal, start, dur) {
+  const ns = ac.createBufferSource();
+  ns.buffer = buf;
+  const f = ac.createBiquadFilter();
+  f.type = filterType; f.frequency.value = filterFreq;
+  if (q) f.Q.value = q;
+  const g = ac.createGain();
+  ns.connect(f); f.connect(g); g.connect(ac.destination);
+  g.gain.setValueAtTime(gainVal, start);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  ns.start(start); ns.stop(start + dur + 0.01);
+}
+
+// ── instruments ───────────────────────────────────────────
+
+function playKick(t) {
+  osc(160, 'sine', 1.2, t, 0.38, 38);
+  noiseNode(noiseBuf(0.05), 'lowpass', 200, null, 0.5, t, 0.05);
+}
+
+function playSnare(t) {
+  noiseNode(noiseBuf(0.22), 'highpass', 1100, null, 0.75, t, 0.18);
+  osc(185, 'sine', 0.55, t, 0.09);
+}
+
+function playClap(t) {
+  [0, 0.013, 0.026].forEach(d => {
+    noiseNode(noiseBuf(0.14), 'bandpass', 3200, 0.6, 0.75, t + d, 0.13);
+  });
+}
+
+function playHihat(t) {
+  noiseNode(noiseBuf(0.07), 'bandpass', 9500, 0.4, 0.42, t, 0.055);
+}
+
+function playOpenHH(t) {
+  noiseNode(noiseBuf(0.45), 'bandpass', 7800, 0.5, 0.38, t, 0.42);
+}
+
+function playRim(t) {
+  osc(430, 'triangle', 0.85, t, 0.055);
+  noiseNode(noiseBuf(0.04), 'highpass', 3000, null, 0.4, t, 0.04);
+}
+
+function playTom(t) {
+  osc(220, 'sine', 0.9, t, 0.28, 75);
+}
+
+function playSub(t) {
+  osc(56, 'sine', 0.95, t, 0.48, 38);
+}
+
+// ── UI ────────────────────────────────────────────────────
+
+const cells = [];
+
+INSTRUMENTS.forEach((inst, r) => {
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const lbl = document.createElement('div');
+  lbl.className = 'row-label';
+  lbl.textContent = inst.name;
+  row.appendChild(lbl);
+
+  const stepsDiv = document.createElement('div');
+  stepsDiv.className = 'steps';
+  cells[r] = [];
+
+  for (let g = 0; g < 4; g++) {
+    const grp = document.createElement('div');
+    grp.className = 'group';
+    for (let s = 0; s < 4; s++) {
+      const step = g * 4 + s;
+      const cell = document.createElement('div');
+      cell.className = 'step';
+      cell.addEventListener('click', () => toggleCell(r, step, cell, inst.color));
+      grp.appendChild(cell);
+      cells[r][step] = cell;
+    }
+    stepsDiv.appendChild(grp);
+  }
+
+  row.appendChild(stepsDiv);
+  document.getElementById('grid').appendChild(row);
+});
+
+function toggleCell(r, step, cell, color) {
+  grid[r][step] = !grid[r][step];
+  if (grid[r][step]) {
+    cell.classList.add('on');
+    cell.style.cssText = `background:${color};border-color:transparent;box-shadow:0 0 10px ${color}66`;
+  } else {
+    cell.classList.remove('on');
+    cell.style.cssText = '';
+  }
+}
+
+// ── default beat ──────────────────────────────────────────
+
+const defaults = {
+  0: [0, 8],               // Kick: 1 & 3
+  1: [4, 12],              // Snare: 2 & 4
+  3: [0,2,4,6,8,10,12,14], // Hi-Hat: 8th notes
+};
+Object.entries(defaults).forEach(([r, steps]) => {
+  steps.forEach(s => toggleCell(+r, s, cells[+r][s], INSTRUMENTS[+r].color));
+});
+
+// ── sequencer ────────────────────────────────────────────
+
+let playing = false;
+let curStep = 0;
+let nextTime = 0;
+let timerId = null;
+const queue = [];
+let lastHighlight = -1;
+
+function stepDur() {
+  return 60 / parseInt(document.getElementById('bpm-slider').value) / 4;
+}
+
+function schedule() {
+  while (nextTime < ac.currentTime + 0.12) {
+    queue.push({ step: curStep, time: nextTime });
+    INSTRUMENTS.forEach((inst, r) => { if (grid[r][curStep]) inst.play(nextTime); });
+    nextTime += stepDur();
+    curStep = (curStep + 1) % STEPS;
+  }
+}
+
+function drawLoop() {
+  const now = ac.currentTime;
+  while (queue.length && queue[0].time <= now + 0.025) {
+    const { step } = queue.shift();
+    if (lastHighlight >= 0) cells.forEach(r => r[lastHighlight].classList.remove('current'));
+    cells.forEach(r => r[step].classList.add('current'));
+    lastHighlight = step;
+  }
+  if (playing) requestAnimationFrame(drawLoop);
+}
+
+function startStop() {
+  if (ac.state === 'suspended') ac.resume();
+  const btn = document.getElementById('play-btn');
+  if (playing) {
+    playing = false;
+    clearInterval(timerId);
+    queue.length = 0;
+    cells.forEach(r => r.forEach(c => c.classList.remove('current')));
+    lastHighlight = -1;
+    btn.textContent = 'Play';
+    btn.classList.remove('playing');
+  } else {
+    playing = true;
+    curStep = 0;
+    nextTime = ac.currentTime + 0.05;
+    timerId = setInterval(schedule, 20);
+    btn.textContent = 'Stop';
+    btn.classList.add('playing');
+    requestAnimationFrame(drawLoop);
+  }
+}
+
+document.getElementById('play-btn').addEventListener('click', startStop);
+
+document.getElementById('clear-btn').addEventListener('click', () => {
+  grid.forEach((row, r) => {
+    row.fill(false);
+    cells[r].forEach(c => { c.classList.remove('on', 'current'); c.style.cssText = ''; });
+  });
+  lastHighlight = -1;
+});
+
+document.getElementById('bpm-slider').addEventListener('input', function () {
+  document.getElementById('bpm-val').textContent = this.value;
+});
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); startStop(); }
+});
+</script>
+</body>
+</html>

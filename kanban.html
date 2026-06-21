@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kanban</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --surface2: #222;
+      --border: #2a2a2a;
+      --border2: #333;
+      --text: #e8e8e8;
+      --muted: #888;
+      --muted2: #555;
+      --col-todo: #6366f1;
+      --col-prog: #f59e0b;
+      --col-done: #22c55e;
+      --p-low: #22c55e;
+      --p-med: #f59e0b;
+      --p-high: #ef4444;
+      --drag-bg: rgba(99,102,241,0.08);
+      --drag-border: #6366f1;
+      --dl-ok: #22c55e;
+      --dl-soon: #f59e0b;
+      --dl-over: #ef4444;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    header h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .search-wrap {
+      flex: 1;
+      max-width: 320px;
+      position: relative;
+    }
+
+    .search-wrap svg {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      pointer-events: none;
+      color: var(--muted2);
+    }
+
+    #search-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.85rem;
+      padding: 7px 12px 7px 32px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    #search-input:focus { border-color: var(--col-todo); }
+    #search-input::placeholder { color: var(--muted2); }
+
+    .search-clear {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--muted2);
+      cursor: pointer;
+      font-size: 14px;
+      display: none;
+      line-height: 1;
+      padding: 2px;
+    }
+
+    .search-clear.visible { display: block; }
+
+    #total-count {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    .board {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      padding: 20px 24px;
+      align-items: start;
+    }
+
+    .column {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      min-height: 200px;
+    }
+
+    .col-header {
+      padding: 14px 16px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .col-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .col-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      flex: 1;
+    }
+
+    .col-count {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted2);
+      background: var(--surface2);
+      border-radius: 20px;
+      padding: 1px 8px;
+    }
+
+    .cards-zone {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 60px;
+      transition: background 0.15s;
+    }
+
+    .cards-zone.drag-over {
+      background: var(--drag-bg);
+      border-radius: 0 0 12px 12px;
+    }
+
+    .card {
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      cursor: grab;
+      user-select: none;
+      transition: opacity 0.15s, border-color 0.15s;
+      position: relative;
+    }
+
+    .card:active { cursor: grabbing; }
+    .card.dragging { opacity: 0.35; }
+    .card:hover { border-color: #444; }
+    .card.hidden { display: none; }
+
+    .card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .card-title {
+      font-size: 0.9rem;
+      font-weight: 500;
+      line-height: 1.4;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .card-actions {
+      display: flex;
+      gap: 2px;
+      opacity: 0;
+      transition: opacity 0.1s;
+      flex-shrink: 0;
+    }
+
+    .card:hover .card-actions { opacity: 1; }
+
+    .card-btn {
+      background: none;
+      border: none;
+      color: var(--muted2);
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: color 0.12s, background 0.12s;
+    }
+
+    .card-btn:hover { background: var(--border2); color: var(--text); }
+    .card-btn.del:hover { color: var(--p-high); }
+
+    .card-desc {
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .priority-badge {
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 20px;
+    }
+
+    .p-low  { color: var(--p-low);  background: rgba(34,197,94,0.12);  }
+    .p-med  { color: var(--p-med);  background: rgba(245,158,11,0.12); }
+    .p-high { color: var(--p-high); background: rgba(239,68,68,0.12);  }
+
+    .deadline-badge {
+      font-size: 0.68rem;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .dl-ok   { color: var(--dl-ok);   background: rgba(34,197,94,0.1); }
+    .dl-soon { color: var(--dl-soon); background: rgba(245,158,11,0.1); }
+    .dl-over { color: var(--dl-over); background: rgba(239,68,68,0.1); }
+    .dl-none { color: var(--muted2);  background: rgba(255,255,255,0.05); }
+
+    .add-btn {
+      margin: 4px 10px 10px;
+      background: none;
+      border: 1px dashed var(--border2);
+      border-radius: 7px;
+      color: var(--muted2);
+      font-size: 0.82rem;
+      padding: 8px 12px;
+      cursor: pointer;
+      text-align: left;
+      width: calc(100% - 20px);
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .add-btn:hover { border-color: var(--muted); color: var(--muted); }
+
+    /* Modal */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s;
+    }
+
+    .overlay.open { opacity: 1; pointer-events: all; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 14px;
+      padding: 24px;
+      width: 380px;
+      max-width: 92vw;
+      transform: translateY(10px);
+      transition: transform 0.15s;
+    }
+
+    .overlay.open .modal { transform: translateY(0); }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    .modal h2 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--muted2);
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      transition: color 0.12s;
+    }
+
+    .modal-close:hover { color: var(--text); }
+
+    .form-group { margin-bottom: 14px; }
+
+    .form-group label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      border-radius: 7px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.88rem;
+      padding: 9px 12px;
+      outline: none;
+      transition: border-color 0.15s;
+      resize: none;
+    }
+
+    .form-group input[type="date"] {
+      color-scheme: dark;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus { border-color: var(--col-todo); }
+
+    .form-group select option { background: var(--surface2); }
+
+    .modal-btns {
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+      margin-top: 20px;
+    }
+
+    .btn-delete-card {
+      background: none;
+      border: 1px solid var(--border2);
+      border-radius: 7px;
+      color: var(--p-high);
+      font-size: 0.85rem;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+
+    .btn-delete-card:hover { background: rgba(239,68,68,0.08); }
+
+    .modal-btns-right { display: flex; gap: 8px; }
+
+    .btn-cancel {
+      background: none;
+      border: 1px solid var(--border2);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 0.85rem;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+
+    .btn-cancel:hover { border-color: var(--muted); }
+
+    .btn-submit {
+      background: var(--col-todo);
+      border: none;
+      border-radius: 7px;
+      color: #fff;
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 8px 18px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity 0.15s;
+    }
+
+    .btn-submit:hover { opacity: 0.88; }
+
+    mark {
+      background: rgba(99,102,241,0.35);
+      color: inherit;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+
+    .no-results {
+      text-align: center;
+      font-size: 0.82rem;
+      color: var(--muted2);
+      padding: 24px 0;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Kanban</h1>
+  <div class="search-wrap">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" id="search-input" placeholder="Hľadaj karty…" oninput="onSearch()" />
+    <button type="button" class="search-clear" id="search-clear" onclick="clearSearch()" title="Vymazať">✕</button>
+  </div>
+  <span id="total-count">0 kariet</span>
+</header>
+
+<div class="board">
+  <div class="column" id="col-todo">
+    <div class="col-header">
+      <div class="col-dot" style="background:var(--col-todo)"></div>
+      <span class="col-title">Todo</span>
+      <span class="col-count" id="count-todo">0</span>
+    </div>
+    <div class="cards-zone" id="zone-todo" data-col="todo"></div>
+    <div class="no-results" id="nr-todo">Žiadne výsledky</div>
+    <button type="button" class="add-btn" onclick="openModal('todo')">+ Pridať kartu</button>
+  </div>
+
+  <div class="column" id="col-inprogress">
+    <div class="col-header">
+      <div class="col-dot" style="background:var(--col-prog)"></div>
+      <span class="col-title">In Progress</span>
+      <span class="col-count" id="count-inprogress">0</span>
+    </div>
+    <div class="cards-zone" id="zone-inprogress" data-col="inprogress"></div>
+    <div class="no-results" id="nr-inprogress">Žiadne výsledky</div>
+    <button class="add-btn" onclick="openModal('inprogress')">+ Pridať kartu</button>
+  </div>
+
+  <div class="column" id="col-done">
+    <div class="col-header">
+      <div class="col-dot" style="background:var(--col-done)"></div>
+      <span class="col-title">Done</span>
+      <span class="col-count" id="count-done">0</span>
+    </div>
+    <div class="cards-zone" id="zone-done" data-col="done"></div>
+    <div class="no-results" id="nr-done">Žiadne výsledky</div>
+    <button class="add-btn" onclick="openModal('done')">+ Pridať kartu</button>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">Nová karta</h2>
+      <button type="button" class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label>Názov</label>
+      <input type="text" id="input-title" placeholder="Čo treba urobiť?" maxlength="80" />
+    </div>
+    <div class="form-group">
+      <label>Popis</label>
+      <textarea id="input-desc" rows="3" placeholder="Viac detailov…"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Priorita</label>
+      <select id="input-priority">
+        <option value="low">Nízka</option>
+        <option value="med" selected>Stredná</option>
+        <option value="high">Vysoká</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Deadline</label>
+      <input type="date" id="input-deadline" />
+    </div>
+    <div class="modal-btns">
+      <button type="button" class="btn-delete-card" id="btn-delete-modal" style="display:none">Odstrániť</button>
+      <div class="modal-btns-right">
+        <button type="button" class="btn-cancel" id="btn-cancel">Zrušiť</button>
+        <button type="button" class="btn-submit" id="btn-submit">Pridať</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PRIORITY_LABEL = { low: 'Nízka', med: 'Stredná', high: 'Vysoká' };
+const COLS = ['todo', 'inprogress', 'done'];
+
+let data = { todo: [], inprogress: [], done: [] };
+let dragId = null;
+let activeCol = null;
+let editId = null;
+let searchQ = '';
+
+function load() {
+  try {
+    const raw = localStorage.getItem('kanban');
+    if (raw) data = JSON.parse(raw);
+  } catch(e) {}
+  COLS.forEach(c => { if (!Array.isArray(data[c])) data[c] = []; });
+}
+
+function save() {
+  try { localStorage.setItem('kanban', JSON.stringify(data)); } catch(e) {}
+}
+
+function uid() { return Math.random().toString(36).slice(2, 9); }
+
+/* ---- deadline helpers ---- */
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function dlClass(dl) {
+  if (!dl) return 'dl-none';
+  const t = today();
+  if (dl < t) return 'dl-over';
+  const soon = new Date(); soon.setDate(soon.getDate() + 2);
+  const soonStr = `${soon.getFullYear()}-${String(soon.getMonth()+1).padStart(2,'0')}-${String(soon.getDate()).padStart(2,'0')}`;
+  if (dl <= soonStr) return 'dl-soon';
+  return 'dl-ok';
+}
+
+function dlLabel(dl) {
+  if (!dl) return '';
+  const t = today();
+  if (dl === t) return '· dnes';
+  const parts = dl.split('-');
+  return `· ${parseInt(parts[2])}.${parseInt(parts[1])}.${parts[0]}`;
+}
+
+/* ---- render ---- */
+function highlight(text, q) {
+  if (!q) return esc(text);
+  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi');
+  return esc(text).replace(re, '<mark>$1</mark>');
+}
+
+function renderAll() {
+  COLS.forEach(col => {
+    const zone = document.getElementById('zone-' + col);
+    zone.innerHTML = '';
+    let visCount = 0;
+    data[col].forEach(card => {
+      const el = makeCardEl(card, col);
+      const matches = !searchQ ||
+        card.title.toLowerCase().includes(searchQ) ||
+        (card.desc && card.desc.toLowerCase().includes(searchQ));
+      if (!matches) el.classList.add('hidden');
+      else visCount++;
+      zone.appendChild(el);
+    });
+    document.getElementById('count-' + col).textContent = data[col].length;
+    const nr = document.getElementById('nr-' + col);
+    nr.style.display = (searchQ && visCount === 0 && data[col].length > 0) ? 'block' : 'none';
+  });
+  const total = COLS.reduce((s, c) => s + data[c].length, 0);
+  document.getElementById('total-count').textContent =
+    total + (total === 1 ? ' karta' : total >= 2 && total <= 4 ? ' karty' : ' kariet');
+}
+
+function makeCardEl(card, col) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.draggable = true;
+  el.dataset.id = card.id;
+
+  const cls = dlClass(card.deadline);
+  const dlHtml = `<span class="deadline-badge ${cls}">${dlLabel(card.deadline) || (card.deadline ? '' : '')}</span>`;
+  const showDl = card.deadline;
+
+  el.innerHTML = `
+    <div class="card-top">
+      <div class="card-title">${highlight(card.title, searchQ)}</div>
+      <div class="card-actions">
+        <button class="card-btn" title="Upraviť" onclick="openEditModal('${col}','${card.id}')">✎</button>
+        <button class="card-btn del" title="Odstrániť" onclick="deleteCard('${col}','${card.id}')">✕</button>
+      </div>
+    </div>
+    ${card.desc ? `<div class="card-desc">${highlight(card.desc, searchQ)}</div>` : ''}
+    <div class="card-footer">
+      <span class="priority-badge p-${card.priority}">${PRIORITY_LABEL[card.priority]}</span>
+      ${showDl ? `<span class="deadline-badge ${cls}">📅 ${dlLabel(card.deadline).slice(2)}</span>` : ''}
+    </div>
+  `;
+  el.addEventListener('dragstart', onDragStart);
+  el.addEventListener('dragend', onDragEnd);
+  return el;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function deleteCard(col, id) {
+  data[col] = data[col].filter(c => c.id !== id);
+  save(); renderAll();
+}
+
+/* ---- drag & drop ---- */
+function onDragStart(e) {
+  dragId = e.currentTarget.dataset.id;
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function onDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.cards-zone').forEach(z => z.classList.remove('drag-over'));
+}
+
+document.querySelectorAll('.cards-zone').forEach(zone => {
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over'); });
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const toCol = zone.dataset.col;
+    const fromCol = COLS.find(c => data[c].some(card => card.id === dragId));
+    if (!fromCol) return;
+    const idx = data[fromCol].findIndex(c => c.id === dragId);
+    if (idx === -1) return;
+    const [card] = data[fromCol].splice(idx, 1);
+    const afterEl = getCardAfterEl(zone, e.clientY);
+    if (afterEl) {
+      const afterIdx = data[toCol].findIndex(c => c.id === afterEl.dataset.id);
+      data[toCol].splice(afterIdx, 0, card);
+    } else {
+      data[toCol].push(card);
+    }
+    save(); renderAll(); dragId = null;
+  });
+});
+
+function getCardAfterEl(zone, y) {
+  const cards = [...zone.querySelectorAll('.card:not(.dragging)')];
+  return cards.reduce((closest, child) => {
+    const box = child.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > (closest.offset || -Infinity)) return { offset, el: child };
+    return closest;
+  }, {}).el || null;
+}
+
+/* ---- modal: add ---- */
+function openModal(col) {
+  activeCol = col;
+  editId = null;
+  document.getElementById('modal-title').textContent = 'Nová karta';
+  document.getElementById('btn-submit').textContent = 'Pridať';
+  document.getElementById('btn-delete-modal').style.display = 'none';
+  document.getElementById('input-title').value = '';
+  document.getElementById('input-desc').value = '';
+  document.getElementById('input-priority').value = 'med';
+  document.getElementById('input-deadline').value = '';
+  document.getElementById('overlay').classList.add('open');
+  setTimeout(() => document.getElementById('input-title').focus(), 80);
+}
+
+/* ---- modal: edit ---- */
+function openEditModal(col, id) {
+  const card = data[col].find(c => c.id === id);
+  if (!card) return;
+  activeCol = col;
+  editId = id;
+  document.getElementById('modal-title').textContent = 'Upraviť kartu';
+  document.getElementById('btn-submit').textContent = 'Uložiť';
+  document.getElementById('btn-delete-modal').style.display = 'inline-block';
+  document.getElementById('input-title').value = card.title;
+  document.getElementById('input-desc').value = card.desc || '';
+  document.getElementById('input-priority').value = card.priority;
+  document.getElementById('input-deadline').value = card.deadline || '';
+  document.getElementById('overlay').classList.add('open');
+  setTimeout(() => document.getElementById('input-title').focus(), 80);
+}
+
+function closeModal() {
+  document.getElementById('overlay').classList.remove('open');
+  activeCol = null; editId = null;
+}
+
+function submitCard() {
+  try {
+    const titleEl = document.getElementById('input-title');
+    const title = titleEl.value.trim();
+    if (!title) {
+      titleEl.style.borderColor = 'var(--p-high)';
+      titleEl.focus();
+      return;
+    }
+    titleEl.style.borderColor = '';
+
+    const desc = document.getElementById('input-desc').value.trim();
+    const priority = document.getElementById('input-priority').value;
+    const deadline = document.getElementById('input-deadline').value;
+
+    if (!activeCol || !data[activeCol]) {
+      alert('Chyba: neznámy stĺpec. Skús znovu.');
+      return;
+    }
+
+    if (editId) {
+      const card = data[activeCol].find(c => c.id === editId);
+      if (card) {
+        card.title = title;
+        card.desc = desc;
+        card.priority = priority;
+        card.deadline = deadline;
+      }
+    } else {
+      data[activeCol].push({ id: uid(), title, desc, priority, deadline });
+    }
+
+    save();
+    searchQ = '';
+    document.getElementById('search-input').value = '';
+    document.getElementById('search-clear').classList.remove('visible');
+    renderAll();
+    closeModal();
+  } catch(err) {
+    alert('Chyba pri ukladaní: ' + err.message);
+  }
+}
+
+function deleteFromModal() {
+  if (!editId || !activeCol) return;
+  data[activeCol] = data[activeCol].filter(c => c.id !== editId);
+  save(); renderAll(); closeModal();
+}
+
+/* ---- search ---- */
+function onSearch() {
+  searchQ = document.getElementById('search-input').value.trim().toLowerCase();
+  document.getElementById('search-clear').classList.toggle('visible', searchQ.length > 0);
+  renderAll();
+}
+
+function clearSearch() {
+  document.getElementById('search-input').value = '';
+  searchQ = '';
+  document.getElementById('search-clear').classList.remove('visible');
+  renderAll();
+}
+
+/* ---- button listeners ---- */
+document.getElementById('btn-submit').addEventListener('click', submitCard);
+document.getElementById('btn-cancel').addEventListener('click', closeModal);
+document.getElementById('btn-delete-modal').addEventListener('click', deleteFromModal);
+document.getElementById('overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+  if (e.key === 'Enter' && document.getElementById('overlay').classList.contains('open')) {
+    if (document.activeElement.tagName !== 'TEXTAREA') submitCard();
+  }
+});
+
+/* ---- seed ---- */
+function seedIfEmpty() {
+  const total = COLS.reduce((s, c) => s + data[c].length, 0);
+  if (total > 0) return;
+  const t = today();
+  const past = '2026-06-18';
+  const future = '2026-06-28';
+  data.todo = [
+    { id: uid(), title: 'Navrhnúť UI pre dashboard', desc: 'Wireframy a farebná paleta', priority: 'high', deadline: future },
+    { id: uid(), title: 'Napísať testy', desc: '', priority: 'low', deadline: '' },
+  ];
+  data.inprogress = [
+    { id: uid(), title: 'Implementovať autentifikáciu', desc: 'Login, register, JWT tokeny', priority: 'high', deadline: past },
+    { id: uid(), title: 'Optimalizovať databázu', desc: 'Indexy na hlavných tabuľkách', priority: 'med', deadline: t },
+  ];
+  data.done = [
+    { id: uid(), title: 'Nastaviť CI/CD pipeline', desc: '', priority: 'med', deadline: '' },
+  ];
+  save();
+}
+
+load();
+seedIfEmpty();
+renderAll();
+</script>
+</body>
+</html>
